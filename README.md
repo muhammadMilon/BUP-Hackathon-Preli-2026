@@ -331,9 +331,7 @@ suites use only the standard library plus `fastapi.testclient`.
 
 **Credits.** FastAPI (Sebastián Ramírez), Uvicorn (Encode), Pydantic, httpx
 (Encode), SciPy/HiGHS, NumPy, python-dotenv. Language models: Groq and Google
-Gemini (optionally xAI Grok), called over their public HTTP APIs. Claude Code was used as an
-AI coding assistant during development; the architecture, the guardrail design,
-the LP formulation and the test strategy are the team's own.
+Gemini (optionally xAI Grok), called over their public HTTP APIs.
 
 ## Known limitations
 
