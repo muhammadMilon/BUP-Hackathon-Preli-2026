@@ -284,7 +284,11 @@ def _pct(text: str) -> Optional[float]:
     if m:
         return max(0.0, 1.0 - float(m.group(1)) / 100.0)
 
-    m = re.search(r"\b(one|two|three|four|five|a|an|\d)\s*[- ]\s*(" + "|".join(FRACTIONS) + r")\b", t)
+    # "one-fifth", "a third", and bare "about half of" / "half the output". A bare
+    # fraction word needs "half" or a following "of" so "quarter past one" stays out.
+    m = re.search(r"\b(one|two|three|four|five|a|an|\d)\s*[- ]\s*(" + "|".join(FRACTIONS) + r")\b", t) or \
+        re.search(r"\b()(half|halves)\b(?!\s*(?:past|an?\s+hour))", t) or \
+        re.search(r"\b()(" + "|".join(FRACTIONS) + r")\s+of\b", t)
     if m:
         frac = min(1.0, MULTIPLIERS.get(m.group(1), 1) * FRACTIONS[m.group(2)])
         before = t[max(0, m.start() - 45):m.start()]

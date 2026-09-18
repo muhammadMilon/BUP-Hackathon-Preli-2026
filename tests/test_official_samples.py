@@ -26,10 +26,21 @@ PACK = os.path.join(os.path.dirname(HERE), "samples", "official_sample_cases.jso
 TOL = 0.01
 
 
-def core(entry: dict) -> tuple:
-    """The machine-checked part of an interpretation entry (explanation excluded)."""
-    return (entry.get("note_index"), entry.get("applies"),
-            entry.get("directive_type"), json.dumps(entry.get("structured_adjustment"), sort_keys=True))
+def same(want: dict, got: dict) -> bool:
+    """Compare the machine-checked part of two entries (explanation excluded).
+
+    Numbers match within the spec's 0.01 tolerance, so 100 and 100.0 are equal.
+    """
+    for key in ("note_index", "applies", "directive_type"):
+        if want.get(key) != got.get(key):
+            return False
+    wa, ga = want.get("structured_adjustment"), got.get("structured_adjustment")
+    if wa is None or ga is None:
+        return wa is None and ga is None
+    if set(wa) != set(ga) or wa.get("hours") != ga.get("hours"):
+        return False
+    return all(isinstance(ga[k], (int, float)) and abs(wa[k] - ga[k]) <= TOL
+               for k in wa if k != "hours")
 
 
 def main() -> int:
@@ -71,7 +82,7 @@ def main() -> int:
         interp_note = ""
         if want:
             got = body["directive_interpretation"]
-            mismatches = [(w, g) for w, g in zip(want, got) if core(w) != core(g)]
+            mismatches = [(w, g) for w, g in zip(want, got) if not same(w, g)]
             if len(got) != len(want) or mismatches:
                 failures += 1
                 print("FAIL", case_id, "- interpretation mismatch")
