@@ -1,6 +1,6 @@
 [Unit]
 Description=Smart Campus Energy Optimization API
-Documentation=https://fest.bupcopc.tech
+Documentation=https://github.com/muhammadMilon/BUP-Hackathon-Preli-2026
 After=network-online.target
 Wants=network-online.target
 
@@ -8,7 +8,8 @@ Wants=network-online.target
 Type=exec
 User=campus
 Group=campus
-WorkingDirectory=/opt/campus-energy
+# `current` is a symlink to the active release; deploy/release.sh flips it.
+WorkingDirectory=/opt/campus-energy/current
 EnvironmentFile=/opt/campus-energy/.env
 ExecStart=/opt/campus-energy/venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 \
@@ -21,12 +22,17 @@ RestartSec=3
 KillSignal=SIGINT
 TimeoutStopSec=20
 
-# The service only ever reads its own directory.
+# The box also hosts other production services, so this one is fenced in:
+# read-only filesystem, no home directories, no privilege escalation.
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/campus-energy
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryMax=2G
 
 StandardOutput=journal
 StandardError=journal

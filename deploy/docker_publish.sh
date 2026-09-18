@@ -81,7 +81,7 @@ DIGEST="$(docker inspect --format='{{index .RepoDigests 0}}' "$REF" 2>/dev/null 
 echo
 echo "Done. Put these in the submission form and the README:"
 echo "    docker pull $REF"
-echo "    docker run -d -p 8000:8000 -e XAI_API_KEY=... -e GEMINI_API_KEY=... $REF"
+echo "    docker run -d -p 8000:8000 -e GROQ_API_KEY=... -e GEMINI_API_KEY=... $REF"
 [[ -n "$DIGEST" ]] && echo "    digest: $DIGEST"
 echo
 echo "Verify from another machine:"
