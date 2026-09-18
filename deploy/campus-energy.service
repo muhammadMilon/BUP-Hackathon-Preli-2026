@@ -1,0 +1,36 @@
+[Unit]
+Description=Smart Campus Energy Optimization API
+Documentation=https://fest.bupcopc.tech
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=campus
+Group=campus
+WorkingDirectory=/opt/campus-energy
+EnvironmentFile=/opt/campus-energy/.env
+ExecStart=/opt/campus-energy/venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 3 \
+    --timeout-keep-alive 65 \
+    --no-access-log
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# The service only ever reads its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/campus-energy
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=campus-energy
+
+[Install]
+WantedBy=multi-user.target
