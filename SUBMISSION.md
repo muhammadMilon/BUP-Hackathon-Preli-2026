@@ -60,8 +60,8 @@ python tests/run_all.py
 **Before you submit, confirm by hand:**
 
 - [ ] `curl http://YOUR_VPS_IP/health` works **from a phone on mobile data**, not just your laptop
-- [ ] `plan_summary` says `via grok` (or `via gemini`), not `via rules` — if it says rules, the API key is wrong
-- [ ] No `.env`, key, or token is in the repo: `git log -p | grep -iE "xai-|AIza|sk-"` returns nothing
+- [ ] `plan_summary` says `via groq` (or `via gemini`), not `via rules` — if it says rules, the API key is wrong
+- [ ] No `.env`, key, or token is in the repo: `git log -p | grep -iE "gsk_|AIza|xai-"` returns nothing
 - [ ] The GitHub repo is set to public **after** the deadline
 - [ ] The Docker image is still pullable from a machine that never built it
 
@@ -84,7 +84,7 @@ Show the diagram from the README.
 
 > Three stages, deliberately separated.
 >
-> **Interpretation** is the language model's job: Grok primary, Gemini as
+> **Interpretation** is the language model's job: Groq primary, Gemini as
 > fallback. It returns structured JSON, one entry per note.
 >
 > **Guardrails** treat that output as untrusted data. Unknown directive types,
@@ -122,7 +122,7 @@ Show the diagram from the README.
 >
 > Show `python tests/run_all.py`: interpretation 22/22, spec compliance 40/40,
 > 250 randomised scenarios with zero rule violations, and the provider chain
-> tested against mocked Grok and Gemini failures.
+> tested against mocked Groq and Gemini failures.
 
 ### 2:30–2:50 — Running it
 

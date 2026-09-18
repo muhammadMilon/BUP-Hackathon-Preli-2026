@@ -9,12 +9,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"
-      - key: XAI_API_KEY
+      - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY
         sync: false
-      - key: XAI_MODEL
-        value: grok-4-fast
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
       - key: LLM_TIMEOUT_SECONDS

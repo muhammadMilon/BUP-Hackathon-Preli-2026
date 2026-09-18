@@ -23,7 +23,7 @@ request, `500` controlled internal error with no stack trace in the body.
 
 ```
 request ──► pydantic schema validation            400 on anything malformed
-        ──► interpret notes   Grok ──► Gemini ──► regex rules
+        ──► interpret notes   Groq ──► Gemini ──► regex rules
         ──► guardrails        untrusted model output is repaired or rejected
                               per note, never silently invented
         ──► constraints       effective solar, reserve floors, grid caps,
@@ -35,12 +35,14 @@ request ──► pydantic schema validation            400 on anything malforme
 
 ### Interpretation tiers
 
-1. **Grok (xAI)** — primary. OpenAI-compatible chat completions in JSON mode.
-   Tries `XAI_MODEL`, then `grok-4-fast`, `grok-3-mini`, `grok-2-1212`, moving on
-   only when a model id is rejected.
-2. **Gemini (Google)** — used when Grok errors, times out, or returns unusable
-   JSON. Constrained by a `responseSchema`.
-3. **Deterministic regex rules** — `app/directives.py`. Never fails, so a
+1. **Groq** — primary. OpenAI-compatible chat completions in JSON mode. Tries
+   `GROQ_MODEL`, then `llama-3.3-70b-versatile`, `openai/gpt-oss-120b`,
+   `llama-3.1-8b-instant`, moving on only when a model id is rejected.
+2. **xAI Grok** — optional extra tier, active only when `XAI_API_KEY` is set.
+   (Note: xAI's *Grok* and *Groq* are unrelated companies.)
+3. **Gemini (Google)** — used when the tiers above error, time out, or return
+   unusable JSON. Constrained by a `responseSchema`.
+4. **Deterministic regex rules** — `app/directives.py`. Never fails, so a
    provider outage costs accuracy rather than the whole response. Currently
    22/22 on the worked examples and paraphrases in `tests/test_interpret.py`.
 
@@ -103,7 +105,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env          # Windows: copy .env.example .env
-# Open .env and paste your XAI_API_KEY and GEMINI_API_KEY (see Configuration)
+# Open .env and paste your GROQ_API_KEY and GEMINI_API_KEY (see Configuration)
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
@@ -153,7 +155,7 @@ Expected shape (abridged — `hourly_plan` has all 24 entries):
   "total_grid_kwh": 5215.0,
   "total_cost_bdt": 54359.0,
   "peak_grid_kwh": 359.0,
-  "plan_summary": "Interpreted 3 operator note(s) via grok ..."
+  "plan_summary": "Interpreted 3 operator note(s) via groq ..."
 }
 ```
 
@@ -169,7 +171,7 @@ OK   SAMPLE-01  interp 2/2  cost  38,365.00 vs reference  38,365.00  [MATCH]  ra
 
 Without API keys the service still runs and answers correctly through the
 deterministic interpreter — `plan_summary` will then say `via rules` instead of
-`via grok`.
+`via groq`.
 
 ## Tests
 
@@ -180,14 +182,14 @@ python tests/run_all.py                  # everything below, in order
 | Suite                     | Covers                                                          |
 | ------------------------- | --------------------------------------------------------------- |
 | `test_interpret.py`       | note → directive accuracy on the worked examples and paraphrases |
-| `test_llm_chain.py`       | Grok success, Gemini fallback, rules fallback, guardrail repair   |
+| `test_llm_chain.py`       | Groq success, Gemini fallback, rules fallback, guardrail repair  |
 | `test_spec_compliance.py` | 40 clause-by-clause assertions against a live response           |
 | `test_end_to_end.py`      | sample scenarios through the real endpoint, replayed             |
 | `test_stress.py`          | 250 randomised scenarios + deliberately hostile model output      |
 
 All run without API keys — the provider chain is exercised with a mocked HTTP
 transport, and the rest run with `LLM_DISABLED=1`. Unset that to test against
-live Grok/Gemini.
+live Groq/Gemini.
 
 Against a deployed URL:
 
@@ -199,32 +201,39 @@ python scripts/check_deployment.py https://your-service.onrender.com
 
 | Variable              | Default            | Purpose                                      |
 | --------------------- | ------------------ | -------------------------------------------- |
-| `XAI_API_KEY`         | —                  | Grok credentials (primary interpreter).      |
-| `XAI_MODEL`           | `grok-4-fast`      | Preferred Grok model id.                     |
-| `GEMINI_API_KEY`      | —                  | Gemini credentials (fallback interpreter).   |
-| `GEMINI_MODEL`        | `gemini-2.5-flash` | Preferred Gemini model id.                   |
-| `LLM_TIMEOUT_SECONDS` | `20`               | Per-call HTTP timeout before the next tier.  |
-| `LLM_DISABLED`        | unset              | `1` skips both providers (tests only).       |
-| `LOG_LEVEL`           | `INFO`             | Standard logging level.                      |
+| `GROQ_API_KEY`             | —                          | Groq credentials (primary interpreter).         |
+| `GROQ_MODEL`               | `llama-3.3-70b-versatile`  | Preferred Groq model id.                        |
+| `GEMINI_API_KEY`           | —                          | Gemini credentials (fallback interpreter).      |
+| `GEMINI_MODEL`             | `gemini-2.5-flash`         | Preferred Gemini model id.                      |
+| `XAI_API_KEY`              | unset                      | Optional. Adds an xAI Grok tier after Groq.     |
+| `XAI_MODEL`                | `grok-4-fast`              | Preferred xAI model id.                         |
+| `LLM_TIMEOUT_SECONDS`      | `8`                        | Per-call HTTP timeout.                          |
+| `LLM_TOTAL_BUDGET_SECONDS` | `15`                       | Budget for the whole interpretation stage.      |
+| `LLM_DISABLED`             | unset                      | `1` skips every provider (tests only).          |
+| `LOG_LEVEL`                | `INFO`                     | Standard logging level.                         |
 
 Identical note sets are cached in-process, so a repeated scenario skips the
 model call entirely.
 
 ### Model / provider disclosure
 
-| Role                  | Provider     | Model identifier                                  | Endpoint |
-| --------------------- | ------------ | ------------------------------------------------- | -------- |
-| Primary interpreter   | xAI (Grok)   | `grok-4-fast`, falling back to `grok-3-mini`, `grok-2-1212` | `https://api.x.ai/v1/chat/completions` (OpenAI-compatible, JSON mode) |
-| Fallback interpreter  | Google       | `gemini-2.5-flash`, falling back to `gemini-2.0-flash` | `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` (constrained `responseSchema`) |
-| Optimizer             | — (local)    | SciPy `linprog`, HiGHS backend                     | in-process |
+| Role | Provider | Model identifier | Endpoint |
+| ---- | -------- | ---------------- | -------- |
+| Primary interpreter | Groq | `llama-3.3-70b-versatile`, falling back to `openai/gpt-oss-120b`, `llama-3.1-8b-instant` | `https://api.groq.com/openai/v1/chat/completions` (OpenAI-compatible, JSON mode) |
+| Optional extra tier | xAI (Grok) | `grok-4-fast`, falling back to `grok-3-mini`, `grok-2-1212` | `https://api.x.ai/v1/chat/completions` — only active when `XAI_API_KEY` is set |
+| Fallback interpreter | Google | `gemini-2.5-flash`, falling back to `gemini-2.0-flash` | `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` (constrained `responseSchema`) |
+| Optimizer | — (local) | SciPy `linprog`, HiGHS backend | in-process |
 
-Get keys at <https://console.x.ai> and <https://aistudio.google.com/apikey>.
+Get keys at <https://console.groq.com/keys> and
+<https://aistudio.google.com/apikey> — both free, neither needs a payment card.
+**Groq and Grok are different companies**: a `gsk_...` key from Groq will not
+work as `XAI_API_KEY`, and an `xai-...` key will not work as `GROQ_API_KEY`.
 
 ### Latency budget
 
 The rubric scores p95 latency and treats anything past 30 s as a failure, so the
 interpretation stage is bounded twice: `LLM_TIMEOUT_SECONDS` caps a single
-provider call, and `LLM_TOTAL_BUDGET_SECONDS` caps Grok + its model retries +
+provider call, and `LLM_TOTAL_BUDGET_SECONDS` caps Groq + its model retries +
 Gemini combined. When the budget runs out the deterministic interpreter answers
 instead, so a slow provider costs accuracy, never a timeout. The LP solve itself
 is ~2 ms; a full request with no model call measures ~65 ms end to end.
@@ -246,7 +255,7 @@ for the full walkthrough. Short version, on a fresh Ubuntu 22.04/24.04 box:
 ```bash
 scp -r . root@YOUR_VPS_IP:/root/campus-energy
 ssh root@YOUR_VPS_IP "cd /root/campus-energy && bash deploy/setup.sh"
-nano /opt/campus-energy/.env        # add XAI_API_KEY and GEMINI_API_KEY
+nano /opt/campus-energy/.env        # add GROQ_API_KEY and GEMINI_API_KEY
 systemctl restart campus-energy
 ```
 
@@ -269,13 +278,13 @@ present inside the image. Judges run it with:
 ```bash
 docker pull YOUR_USER/campus-energy:v1
 docker run -d -p 8000:8000 \
-  -e XAI_API_KEY=... -e GEMINI_API_KEY=... \
+  -e GROQ_API_KEY=... -e GEMINI_API_KEY=... \
   YOUR_USER/campus-energy:v1
 curl http://localhost:8000/health
 ```
 
 Exposed port **8000**, bound to `0.0.0.0`. Required environment variable names
-are `XAI_API_KEY` and `GEMINI_API_KEY`; everything else has a working default.
+are `GROQ_API_KEY` and `GEMINI_API_KEY`; everything else has a working default.
 The container is functional without any keys (deterministic interpreter).
 
 Also included for other hosts: `render.yaml` and a `Procfile`.
@@ -287,7 +296,7 @@ Also included for other hosts: `render.yaml` and a `Procfile`.
 | `fastapi`        | 0.115.6  | HTTP routing and request handling                |
 | `uvicorn`        | 0.34.0   | ASGI server                                      |
 | `pydantic`       | 2.10.4   | Strict request/response schema validation        |
-| `httpx`          | 0.28.1   | Async HTTP client for the Grok and Gemini calls  |
+| `httpx`          | 0.28.1   | Async HTTP client for the Groq and Gemini calls  |
 | `scipy`          | 1.15.0   | `linprog` / HiGHS — the optimizer                |
 | `numpy`          | 2.2.1    | Constraint matrix assembly                       |
 | `python-dotenv`  | 1.0.1    | Loads `.env` in local development                |
@@ -296,8 +305,8 @@ No other runtime dependency. Development used `pyflakes` for linting; the test
 suites use only the standard library plus `fastapi.testclient`.
 
 **Credits.** FastAPI (Sebastián Ramírez), Uvicorn (Encode), Pydantic, httpx
-(Encode), SciPy/HiGHS, NumPy, python-dotenv. Language models: xAI Grok and
-Google Gemini, called over their public HTTP APIs. Claude Code was used as an
+(Encode), SciPy/HiGHS, NumPy, python-dotenv. Language models: Groq and Google
+Gemini (optionally xAI Grok), called over their public HTTP APIs. Claude Code was used as an
 AI coding assistant during development; the architecture, the guardrail design,
 the LP formulation and the test strategy are the team's own.
 
@@ -354,7 +363,7 @@ From the **Participant Guide & Evaluation Rubric**:
 
 | Rubric category | Points | How this submission addresses it |
 | --------------- | -----: | -------------------------------- |
-| LLM Directive Interpretation | 25 | Grok → Gemini chain; relevance/type/hours/values all machine-checked against the reference pack; paraphrase robustness comes from the model, with the regex tier as backup |
+| LLM Directive Interpretation | 25 | Groq → Gemini chain; relevance/type/hours/values all machine-checked against the reference pack; paraphrase robustness comes from the model, with the regex tier as backup |
 | Directive Application & Constraint Correctness | 25 | Directives become LP constraints *before* the solve, then `validate.replay` re-verifies the finished plan |
 | Optimization Quality | 10 | Exact LP optimum. On SAMPLE-01 our cost equals the organizer's reference optimum (ratio 1.0000) |
 | API Contract & Schema | 10 | Strict Pydantic models; 400 on malformed/invalid; `test_spec_compliance.py` |
@@ -370,7 +379,7 @@ See **[SUBMISSION.md](SUBMISSION.md)** for the deliverables checklist and the
 ```
 app/
   main.py         FastAPI endpoints, response assembly, self-check
-  llm.py          Grok -> Gemini -> rules interpretation chain
+  llm.py          Groq -> Gemini -> rules interpretation chain
   directives.py   guardrails + deterministic interpreter
   timeparse.py    natural-language time windows (exclusive end hour)
   optimizer.py    constraint assembly and the linear program

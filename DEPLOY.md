@@ -49,11 +49,12 @@ nano /opt/campus-energy/.env
 ```
 
 ```
-XAI_API_KEY=xai-...................
-XAI_MODEL=grok-4-fast
+GROQ_API_KEY=gsk_...................
+GROQ_MODEL=llama-3.3-70b-versatile
 GEMINI_API_KEY=AIza...................
 GEMINI_MODEL=gemini-2.5-flash
-LLM_TIMEOUT_SECONDS=20
+LLM_TIMEOUT_SECONDS=8
+LLM_TOTAL_BUDGET_SECONDS=15
 LOG_LEVEL=INFO
 ```
 
@@ -63,9 +64,9 @@ Then:
 systemctl restart campus-energy
 ```
 
-Keys: xAI at <https://console.x.ai>, Gemini at <https://aistudio.google.com/apikey>.
-Both are needed for the graded path — Grok interprets, Gemini covers Grok
-outages. The service still answers with the deterministic interpreter if both
+Keys: Groq at <https://console.groq.com/keys>, Gemini at
+<https://aistudio.google.com/apikey>. Both are free and need no payment card.
+Groq interprets; Gemini covers Groq outages. The service still answers with the deterministic interpreter if both
 are missing, but that forfeits the LLM requirement in Section 02.
 
 ## 5. Verify
@@ -130,8 +131,8 @@ in hPanel (VPS → Firewall) allows inbound TCP 80, then `ufw status` on the box
 malformed `.env` line is the usual cause; every line must be `KEY=value` with no
 quotes needed.
 
-**Responses say `provider=rules`** — the API keys are missing or rejected. The
-`plan_summary` carries the reason (`grok unavailable: ...`), and so does the
+**Responses say `via rules`** — the API keys are missing or rejected. The
+`plan_summary` carries the reason (`groq unavailable: ...`), and so does the
 log. Fix the key and restart.
 
 **Slow first request** — the model call dominates. Repeated note sets are cached

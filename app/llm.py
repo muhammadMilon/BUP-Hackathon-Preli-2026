@@ -2,9 +2,11 @@
 
 Tiered on purpose:
 
-  1. Grok (xAI)      -- primary language model.
-  2. Gemini (Google) -- used when Grok errors, times out, or returns nothing usable.
-  3. Regex rules     -- deterministic last resort so a provider outage degrades
+  1. Groq            -- primary language model (OpenAI-compatible API).
+  2. xAI Grok        -- optional extra tier, used only when XAI_API_KEY is set.
+  3. Gemini (Google) -- used when the tiers above error, time out, or return
+                        nothing usable.
+  4. Regex rules     -- deterministic last resort so a provider outage degrades
                         the answer instead of failing the request.
 
 Whatever a model returns is untrusted structured data: every entry goes through
@@ -26,6 +28,7 @@ import httpx
 from app.directives import DirectiveError, normalize_entry, rule_based_interpret
 from app.schemas import Battery, OptimizeRequest
 
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 XAI_URL = "https://api.x.ai/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
@@ -40,8 +43,27 @@ def _model_chain(configured: Optional[str], defaults: Sequence[str]) -> List[str
     return chain
 
 
+GROQ_MODELS = _model_chain(
+    os.getenv("GROQ_MODEL"),
+    ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "llama-3.1-8b-instant"])
 XAI_MODELS = _model_chain(os.getenv("XAI_MODEL"), ["grok-4-fast", "grok-3-mini", "grok-2-1212"])
 GEMINI_MODELS = _model_chain(os.getenv("GEMINI_MODEL"), ["gemini-2.5-flash", "gemini-2.0-flash"])
+
+
+def _openai_providers() -> List[Dict[str, Any]]:
+    """OpenAI-compatible tiers that have a key configured, in priority order.
+
+    Keys are read per call rather than at import so a restart is not needed
+    after editing .env, and so tests can toggle providers.
+    """
+    tiers = []
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key:
+        tiers.append({"name": "groq", "url": GROQ_URL, "key": groq_key, "models": GROQ_MODELS})
+    xai_key = os.getenv("XAI_API_KEY", "").strip()
+    if xai_key:
+        tiers.append({"name": "grok", "url": XAI_URL, "key": xai_key, "models": XAI_MODELS})
+    return tiers
 
 # The rubric scores p95 latency (<=5s for full marks) and treats anything past
 # 30s as a failure. One provider call is capped at TIMEOUT, and the whole
@@ -163,13 +185,14 @@ def _is_model_error(status: int, body: str) -> bool:
     return status in (400, 404) and "model" in body.lower()
 
 
-async def _call_grok(client, req, deadline):
-    key = os.getenv("XAI_API_KEY", "").strip()
-    if not key:
-        return None, "XAI_API_KEY is not set"
+async def _call_openai_compatible(client, req, deadline, provider):
+    """Call any OpenAI-compatible /chat/completions endpoint (Groq, xAI, ...)."""
+    name = provider["name"]
+    key = provider["key"]
+    url = provider["url"]
 
-    last_error = "no xAI model responded"
-    for model in XAI_MODELS:
+    last_error = "no {} model responded".format(name)
+    for model in provider["models"]:
         if deadline.expired():
             return None, "ran out of time budget"
 
@@ -184,17 +207,17 @@ async def _call_grok(client, req, deadline):
         }
         try:
             resp = await client.post(
-                XAI_URL, json=body,
+                url, json=body,
                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
                 timeout=min(TIMEOUT, deadline.remaining()),
             )
         except (httpx.HTTPError, asyncio.TimeoutError) as exc:
-            last_error = "xAI request failed: {}".format(type(exc).__name__)
+            last_error = "{} request failed: {}".format(name, type(exc).__name__)
             continue
 
         if resp.status_code != 200:
             snippet = resp.text[:200]
-            last_error = "xAI returned HTTP {}".format(resp.status_code)
+            last_error = "{} returned HTTP {}".format(name, resp.status_code)
             if _is_model_error(resp.status_code, snippet):
                 continue  # try the next model id
             break
@@ -202,12 +225,12 @@ async def _call_grok(client, req, deadline):
         try:
             content = resp.json()["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError, TypeError):
-            last_error = "xAI response had an unexpected shape"
+            last_error = "{} response had an unexpected shape".format(name)
             continue
 
         entries = _entries_from(_extract_json(content))
         if entries is None:
-            last_error = "xAI did not return usable JSON"
+            last_error = "{} did not return usable JSON".format(name)
             continue
         return entries, None
 
@@ -361,12 +384,18 @@ async def interpret_notes(req: OptimizeRequest) -> Tuple[List[Dict[str, Any]], s
 
     if not LLM_DISABLED:
         deadline = _Deadline(TOTAL_BUDGET)
+        tiers = _openai_providers()
+        if not tiers:
+            warnings.append("no OpenAI-compatible key configured (set GROQ_API_KEY)")
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            raw, error = await _call_grok(client, req, deadline)
-            if raw is not None:
-                entries, provider = _align(raw, req), "grok"
-            else:
-                warnings.append("grok unavailable: " + (error or "unknown error"))
+            for tier in tiers:
+                raw, error = await _call_openai_compatible(client, req, deadline, tier)
+                if raw is not None:
+                    entries, provider = _align(raw, req), tier["name"]
+                    break
+                warnings.append(tier["name"] + " unavailable: " + (error or "unknown error"))
+
+            if entries is None:
                 raw, error = await _call_gemini(client, req, deadline)
                 if raw is not None:
                     entries, provider = _align(raw, req), "gemini"
