@@ -1,7 +1,16 @@
 # Smart Campus Energy Optimization
 
+[![CI/CD](https://github.com/muhammadMilon/BUP-Hackathon-Preli-2026/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/muhammadMilon/BUP-Hackathon-Preli-2026/actions/workflows/ci-cd.yml)
+
 LLM-assisted operator-directive interpretation and 24-hour energy scheduling for
 the BUP CSE Fest 2026 hackathon preliminary round.
+
+| | |
+| --- | --- |
+| **Health** | `http://82.112.237.249/health` |
+| **Main endpoint** | `POST http://82.112.237.249/optimize-energy` |
+| **Docker fallback** | `docker pull ghcr.io/muhammadmilon/bup-hackathon-preli-2026:latest` |
+| **Official samples** | 10/10 interpretations correct, cost equal to the reference optimum on all 10 (ratio 1.0000) |
 
 The service reads short natural-language operator notes, converts the relevant
 ones into structured directives, validates those directives with deterministic
@@ -185,6 +194,10 @@ python tests/test_official_samples.py
 
 ```
 OK   SAMPLE-01  interp 2/2  cost  38,365.00 vs reference  38,365.00  [MATCH]  ratio 1.0000
+...
+OK   SAMPLE-10  interp 3/3  cost  41,620.00 vs reference  41,620.00  [MATCH]  ratio 1.0000
+optimization quality: 1.0000 average ratio -> 10.00/10 rubric points
+official samples: 0 failure(s) over 10 case(s)
 ```
 
 Without API keys the service still runs and answers correctly through the
@@ -212,7 +225,7 @@ live Groq/Gemini.
 Against a deployed URL:
 
 ```bash
-python scripts/check_deployment.py https://your-service.onrender.com
+python scripts/check_deployment.py http://82.112.237.249
 ```
 
 ## Configuration
@@ -267,45 +280,39 @@ contains a `.env` file.
 
 ## Deploying
 
-**Hostinger VPS (the target for this submission)** — see **[DEPLOY.md](DEPLOY.md)**
-for the full walkthrough. Short version, on a fresh Ubuntu 22.04/24.04 box:
+Production is a Hostinger VPS: nginx on port 80 in front of three uvicorn
+workers under systemd, shipped by GitHub Actions on every push to `main`.
 
-```bash
-scp -r . root@YOUR_VPS_IP:/root/campus-energy
-ssh root@YOUR_VPS_IP "cd /root/campus-energy && bash deploy/setup.sh"
-nano /opt/campus-energy/.env        # add GROQ_API_KEY and GEMINI_API_KEY
-systemctl restart campus-energy
+```
+push ─► test (6 suites) ─┬─► docker: build, keyless smoke test, publish to GHCR
+                         └─► deploy: new release on the VPS ─► health check
+                                     (auto-rollback on failure) ─► public replay check
 ```
 
-That gives nginx on port 80 in front of three uvicorn workers under systemd,
-with ufw configured and the service enabled at boot. Push later changes with
-`bash deploy/update.sh`.
+Releases are atomic (a symlink flip) and the previous five are kept for
+rollback. The CI key can only deliver a release tarball: it is pinned to a
+forced command server-side, so it has no shell on the host. **[DEPLOY.md](DEPLOY.md)**
+covers the layout, provisioning a fresh server, and operations.
 
 ### Docker fallback image
 
-Build, smoke-test and publish in one step (needs `docker login` first):
+Published by CI after the image passes a keyless smoke test:
 
 ```bash
-bash deploy/docker_publish.sh docker.io/YOUR_USER/campus-energy v1
-```
-
-The script refuses to push unless the image starts with **no environment
-variables at all** and still answers `GET /health`, and unless no `.env` is
-present inside the image. Judges run it with:
-
-```bash
-docker pull YOUR_USER/campus-energy:v1
+docker pull ghcr.io/muhammadmilon/bup-hackathon-preli-2026:latest
 docker run -d -p 8000:8000 \
   -e GROQ_API_KEY=... -e GEMINI_API_KEY=... \
-  YOUR_USER/campus-energy:v1
+  ghcr.io/muhammadmilon/bup-hackathon-preli-2026:latest
 curl http://localhost:8000/health
 ```
 
-Exposed port **8000**, bound to `0.0.0.0`. Required environment variable names
-are `GROQ_API_KEY` and `GEMINI_API_KEY`; everything else has a working default.
-The container is functional without any keys (deterministic interpreter).
+Exposed port **8000**, bound to `0.0.0.0`, running as a non-root user with a
+built-in `HEALTHCHECK`. Required environment variable names are `GROQ_API_KEY`
+and `GEMINI_API_KEY`; everything else has a working default. The container is
+functional without any keys (deterministic interpreter).
 
-Also included for other hosts: `render.yaml` and a `Procfile`.
+To publish to another registry, `bash deploy/docker_publish.sh <registry/user/name> <tag>`
+runs the same checks locally and refuses to push an image that contains a `.env`.
 
 ## Dependencies
 
@@ -346,9 +353,6 @@ the LP formulation and the test strategy are the team's own.
   It exists to keep the service answering during a provider outage, not to match
   the model's coverage. It scores 22/22 on the published examples and their
   paraphrases, but hidden wording could fall outside its patterns.
-- **Ambiguous bare clock times** (`"from one until three"`) are read as
-  afternoon, matching the worked example in the Problem Statement. A note
-  genuinely meaning 1 AM would be misread.
 - **No grid export.** Surplus solar is curtailed, per Section 9.4.
 - **In-process cache only.** Running multiple workers means each has its own
   cache; this affects latency slightly, never correctness.
@@ -361,7 +365,7 @@ the LP formulation and the test strategy are the team's own.
 
 | Spec clause                                          | Where it is enforced                                   |
 | ---------------------------------------------------- | ------------------------------------------------------ |
-| §02 LLM in the interpretation path                    | `llm.py` — Grok, then Gemini; rules only as a safety net |
+| §02 LLM in the interpretation path                    | `llm.py` — Groq, then Gemini; rules only as a safety net |
 | §04 six directive types, exact adjustment shapes      | `directives.SHAPE`, `normalize_entry`                   |
 | §05.1 one entry per note, in `note_index` order       | `llm._align`                                            |
 | §05.1 exclusive end hour ("1 PM to 3 PM" → `[13,14]`) | `timeparse.extract_hours`                               |
@@ -387,14 +391,11 @@ From the **Participant Guide & Evaluation Rubric**:
 | --------------- | -----: | -------------------------------- |
 | LLM Directive Interpretation | 25 | Groq → Gemini chain; relevance/type/hours/values all machine-checked against the reference pack; paraphrase robustness comes from the model, with the regex tier as backup |
 | Directive Application & Constraint Correctness | 25 | Directives become LP constraints *before* the solve, then `validate.replay` re-verifies the finished plan |
-| Optimization Quality | 10 | Exact LP optimum. On SAMPLE-01 our cost equals the organizer's reference optimum (ratio 1.0000) |
+| Optimization Quality | 10 | Exact LP optimum. On all 10 official samples our cost equals the organizer's reference optimum (ratio 1.0000) |
 | API Contract & Schema | 10 | Strict Pydantic models; 400 on malformed/invalid; `test_spec_compliance.py` |
 | Performance & Reliability | 10 | ~65 ms without a model call; bounded LLM budget so p95 stays low and nothing can reach the 30 s timeout; no 5xx on malformed input; no secrets in logs or responses |
-| Deployment & Docker Fallback | 10 | `deploy/setup.sh` for the VPS; `deploy/docker_publish.sh` builds, verifies keyless `/health`, refuses to push an image containing `.env` |
+| Deployment & Docker Fallback | 10 | Live on a VPS with CI/CD, atomic releases and auto-rollback; CI publishes the Docker image only after a keyless `/health` + `/optimize-energy` smoke test and a no-`.env` check |
 | Documentation & Local Reproducibility | 10 | This README: clean quickstart, env var names, model/provider table, solver disclosure, sample test command with expected output, dependencies, limitations, secret handling |
-
-See **[SUBMISSION.md](SUBMISSION.md)** for the deliverables checklist and the
-3-minute video script.
 
 ## Layout
 
@@ -407,7 +408,9 @@ app/
   optimizer.py    constraint assembly and the linear program
   validate.py     independent replay of a finished response
   schemas.py      strict request/response models
-samples/          public sample scenarios
+samples/          public and official sample scenarios
 scripts/          deployment smoke test
 tests/            interpretation, end-to-end and stress suites
+deploy/           VPS provisioning, atomic releases, systemd unit, nginx site
+.github/workflows CI/CD: test -> Docker image -> deploy
 ```
