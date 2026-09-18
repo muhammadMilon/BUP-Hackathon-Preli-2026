@@ -14,8 +14,8 @@ jobs:
     name: Test suites
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -31,7 +31,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build
         run: docker build -t campus-energy:ci .
       - name: Smoke test with no environment variables
@@ -71,7 +71,7 @@ jobs:
       name: production
       url: http://${{ vars.VPS_HOST }}/health
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Configure SSH
         run: |
           install -d -m 700 ~/.ssh
@@ -85,7 +85,7 @@ jobs:
         run: |
           git archive --format=tar.gz HEAD app samples scripts tests requirements.txt \
             | ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes root@${{ vars.VPS_HOST }} "${GITHUB_SHA::7}"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
