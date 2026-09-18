@@ -46,6 +46,13 @@ request ──► pydantic schema validation            400 on anything malforme
    provider outage costs accuracy rather than the whole response. Currently
    22/22 on the worked examples and paraphrases in `tests/test_interpret.py`.
 
+One further deterministic check runs on top: a `solar_reduction` aimed at hours
+whose forecast solar is zero cannot be what an operator meant, so when the
+regex reader finds a daylight window for the same note we take its hours and
+keep the model's factor. This catches the one failure mode observed in live
+testing — a bare "from one until three" read as 01:00 rather than 13:00, which
+Groq got wrong 4 times in 10 before the check and 0 times in 10 after it.
+
 A model reply is treated as untrusted data. `normalize_entry` repairs what is
 unambiguously repairable (unsorted or duplicated hours, `20` written for a
 `0.2` factor, a missing explanation) and rejects the rest — unknown directive
@@ -320,6 +327,10 @@ the LP formulation and the test strategy are the team's own.
 - **A relevant note with no stated time window applies to all 24 hours.** There
   is no other defensible default, but a note meaning "for the next hour" would
   be over-applied.
+- **Bare clock times are genuinely ambiguous.** The prompt and the daylight
+  check both push "from one until three" toward the afternoon, matching the
+  Problem Statement's worked example. A note truly meaning 1 AM would be
+  misread — but for solar that reading is meaningless anyway.
 - **The deterministic fallback is weaker than the LLM** on unusual paraphrases.
   It exists to keep the service answering during a provider outage, not to match
   the model's coverage. It scores 22/22 on the published examples and their

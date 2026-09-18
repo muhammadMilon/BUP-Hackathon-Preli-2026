@@ -100,6 +100,10 @@ Rules:
   "6 PM until 9 PM" is [18, 19, 20]. A window crossing midnight wraps, still ascending.
 - factor is the fraction of solar that REMAINS, not the amount lost. "drops to 20%",
   "one-fifth of normal" and "an 80% reduction" all mean factor = 0.2. Range 0..1.
+- A bare clock time with no AM/PM in a note about solar, panel cleaning or other
+  daytime work means the DAYTIME hour: "panel washing from one until three"
+  is [13, 14], not [1, 2]. Solar output is zero overnight, so a solar_reduction
+  on night hours is almost always a misread clock.
 - Never invent demand, tariff, solar or battery numbers, and never invent a
   directive type outside the list above.
 - Use only what the note states. If a note is relevant but states no time window,
@@ -343,6 +347,39 @@ def _unflatten(entry: Any) -> Any:
 # --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
+def _daylight_sanity(entry: Dict[str, Any], note: str, req: OptimizeRequest) -> Dict[str, Any]:
+    """Repair a solar_reduction aimed at hours that have no sun.
+
+    Models occasionally read a bare "from one until three" as 01:00-03:00. A
+    solar directive over hours whose forecast solar is zero cannot be what the
+    operator meant, so when the deterministic reader finds a daylight window for
+    the same note we take its hours and keep the model's factor. This only ever
+    moves a directive onto hours that actually have solar -- it never invents
+    one, and it leaves every other directive type untouched.
+    """
+    if entry["directive_type"] != "solar_reduction":
+        return entry
+
+    solar = {h.hour: float(h.solar_kwh) for h in req.hours_sorted()}
+    window = entry["structured_adjustment"]["hours"]
+    if sum(solar.get(h, 0.0) for h in window) > 0.0:
+        return entry
+
+    fallback = rule_based_interpret(note, entry["note_index"], req.battery)
+    if fallback["directive_type"] != "solar_reduction":
+        return entry
+    alt = fallback["structured_adjustment"]["hours"]
+    if sum(solar.get(h, 0.0) for h in alt) <= 0.0:
+        return entry
+
+    repaired = dict(entry)
+    repaired["structured_adjustment"] = {
+        "hours": alt,
+        "factor": entry["structured_adjustment"]["factor"],
+    }
+    return repaired
+
+
 def _align(raw_entries: Sequence[Any], req: OptimizeRequest) -> List[Dict[str, Any]]:
     """Map raw entries onto exactly one guardrail-clean entry per note."""
     by_index: Dict[int, Any] = {}
@@ -364,7 +401,8 @@ def _align(raw_entries: Sequence[Any], req: OptimizeRequest) -> List[Dict[str, A
         try:
             if candidate is None:
                 raise DirectiveError("no interpretation returned for this note")
-            final.append(normalize_entry(candidate, position, req.battery))
+            clean = normalize_entry(candidate, position, req.battery)
+            final.append(_daylight_sanity(clean, note, req))
         except DirectiveError:
             # One bad entry only costs us that note, not the whole response.
             final.append(rule_based_interpret(note, position, req.battery))
