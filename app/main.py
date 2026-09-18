@@ -105,7 +105,34 @@ def _summary(req: OptimizeRequest, entries: List[Dict[str, Any]], plan: List[Dic
     return text
 
 
-@app.post("/optimize-energy")
+def _example_request() -> Dict[str, Any]:
+    """A real sample scenario, used to prefill the body box in /docs."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "samples", "public_cases.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)[0]
+    except (OSError, ValueError, IndexError):
+        return {"scenario_id": "GRID-101", "operator_notes": ["..."], "hours": [], "battery": {}}
+
+
+# The handler reads the raw body so malformed JSON can return 400 rather than
+# FastAPI's own 422. That means FastAPI cannot infer the request schema, so it
+# is declared here -- otherwise /docs offers no body box to test with.
+@app.post(
+    "/optimize-energy",
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": OptimizeRequest.model_json_schema(),
+                    "example": _example_request(),
+                }
+            },
+        }
+    },
+)
 async def optimize_energy(request: Request) -> JSONResponse:
     started = time.perf_counter()
 

@@ -166,7 +166,18 @@ Expected shape (abridged — `hourly_plan` has all 24 entries):
 }
 ```
 
-**3. Verify it against the organizer's own reference answer**
+**3. Or use the helper script / the browser**
+
+```bash
+python scripts/try_case.py 1          # posts a sample case, prints it readably
+python scripts/try_case.py 1 --full   # all 24 plan rows
+python scripts/try_case.py SAMPLE-01  # a case from the organizer pack
+```
+
+Interactive API docs with a prefilled request body, ready to edit and send:
+<http://localhost:8000/docs>
+
+**4. Verify it against the organizer's own reference answer**
 
 ```bash
 python tests/test_official_samples.py
